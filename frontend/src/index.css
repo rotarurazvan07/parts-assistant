@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-background text-text-primary;
+}
+
+@layer base {
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading font-bold;
+  }
+  
+  body {
+    @apply font-body;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary text-background px-4 py-2 rounded-sm border border-border font-mono uppercase;
+  }
+  
+  .btn-secondary {
+    @apply bg-panel text-text-primary border border-border font-mono px-4 py-2 rounded-sm;
+  }
+  
+  .input-field {
+    @apply bg-panel text-text-primary border border-border p-2 font-mono;
+  }
+}
