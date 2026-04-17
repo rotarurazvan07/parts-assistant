@@ -1,333 +1,391 @@
-import React, { useState, useEffect } from 'react';
-import { useForm, Controller } from 'react-hook-form';
-import { yupResolver } from '@hookform/resolvers/yup';
-import * as yup from 'yup';
-import Modal from '../ui/Modal';
-import Button from '../ui/Button';
-import InputField from '../ui/InputField';
-import SelectField from '../ui/SelectField';
-import TextArea from '../ui/TextArea';
-import Tabs from '../ui/Tabs';
+import { useState, useEffect } from 'react'
+import { useForm, useFieldArray } from 'react-hook-form'
+import { useApp } from '../../context/AppContext'
+import { usePart, useCreatePart, useUpdatePart, useCategories, useBins } from '../../hooks/useData'
+import { partsApi, documentsApi } from '../../services/api'
+import { Modal, Tabs, Button, Input, Textarea, Select, TagList, Spinner } from '../ui'
+import toast from 'react-hot-toast'
+import { useQueryClient } from '@tanstack/react-query'
 
-// Validation schema for part form
-const partSchema = yup.object({
-  name: yup.string().required('Part name is required'),
-  part_number: yup.string().optional(),
-  manufacturer: yup.string().optional(),
-  category_id: yup.number().nullable().optional(),
-  bin_id: yup.number().nullable().optional(),
-  quantity: yup.number().nullable().optional(),
-  description: yup.string().optional(),
-  tags: yup.string().optional(),
-  datasheet_url: yup.string().url('Please enter a valid URL').optional(),
-  image_url: yup.string().url('Please enter a valid URL').optional(),
-  supplier: yup.string().optional(),
-  supplier_part_number: yup.string().optional(),
-  location: yup.string().optional(),
-  notes: yup.string().optional()
-}).required();
+const TABS = [
+  { id: 'details', label: 'Details' },
+  { id: 'specs', label: 'Specs' },
+  { id: 'docs', label: 'Documents' },
+]
 
-const PartModal = ({ isOpen, onClose, part, categories, bins, onSave, onDelete }) => {
-  // State for active tab
-  const [activeTab, setActiveTab] = useState(0);
-  
-  // State for specifications
-  const [specifications, setSpecifications] = useState(part?.specifications || []);
-  const [newSpecification, setNewSpecification] = useState({ name: '', value: '' });
-  
-  // State for documents
-  const [documents, setDocuments] = useState(part?.documents || []);
-  const [newDocument, setNewDocument] = useState({ name: '', url: '' });
-  
-  // State for tags
-  const [tags, setTags] = useState(part?.tags ? part.tags.split(',').map(tag => tag.trim()) : []);
-  const [newTag, setNewTag] = useState('');
-  
-  // Initialize form with react-hook-form
-  const {
-    register,
-    handleSubmit,
-    control,
-    formState: { errors },
-    reset,
-    setValue
-  } = useForm({
-    resolver: yupResolver(partSchema),
-    defaultValues: {
-      name: part?.name || '',
-      part_number: part?.part_number || '',
-      manufacturer: part?.manufacturer || '',
-      category_id: part?.category_id || '',
-      bin_id: part?.bin_id || '',
-      quantity: part?.quantity || '',
-      description: part?.description || '',
-      tags: part?.tags || '',
-      datasheet_url: part?.datasheet_url || '',
-      image_url: part?.image_url || '',
-      supplier: part?.supplier || '',
-      supplier_part_number: part?.supplier_part_number || '',
-      location: part?.location || '',
-      notes: part?.notes || ''
-    }
-  });
-  
-  // Handle form submission
-  const onSubmit = (data) => {
-    // Prepare data to save
-    const dataToSave = {
-      ...data,
-      tags: tags.join(', '),
-      specifications: specifications,
-      documents: documents
-    };
-    
-    onSave(dataToSave);
-  };
-  
-  // Handle delete
-  const handleDelete = () => {
-    if (window.confirm('Are you sure you want to delete this part?')) {
-      onDelete(part.id);
-      onClose();
-    }
-  };
-  
-  // Handle specifications changes
-  const handleAddSpecification = () => {
-    if (newSpecification.name && newSpecification.value) {
-      setSpecifications(prev => [...prev, newSpecification]);
-      setNewSpecification({ name: '', value: '' });
-    }
-  };
-  
-  const handleRemoveSpecification = (index) => {
-    setSpecifications(prev => prev.filter((_, i) => i !== index));
-  };
-  
-  // Handle documents changes
-  const handleAddDocument = () => {
-    if (newDocument.name && newDocument.url) {
-      setDocuments(prev => [...prev, newDocument]);
-      setNewDocument({ name: '', url: '' });
-    }
-  };
-  
-  const handleRemoveDocument = (index) => {
-    setDocuments(prev => prev.filter((_, i) => i !== index));
-  };
-  
-  // Handle tags changes
-  const handleAddTag = () => {
-    if (newTag.trim()) {
-      setTags(prev => [...prev, newTag.trim()]);
-      setNewTag('');
-    }
-  };
-  
-  const handleRemoveTag = (index) => {
-    setTags(prev => prev.filter((_, i) => i !== index));
-  };
-  
-  // Prepare category options
-  const categoryOptions = categories.map(cat => ({
-    value: cat.id,
-    label: cat.name
-  }));
-  
-  // Prepare bin options
-  const binOptions = bins.map(bin => ({
-    value: bin.id,
-    label: bin.name
-  }));
-  
+// ── Specifications tab ─────────────────────────────────────────────
+function SpecsTab({ fields, append, remove, register }) {
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="lg">
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <Tabs activeTab={activeTab} setActiveTab={setActiveTab}>
-          <Tabs.Tab label="Details">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <InputField
-                label="Part Name"
-                error={errors.name?.message}
-                {...register('name')}
-              />
-              <InputField
-                label="Part Number"
-                error={errors.part_number?.message}
-                {...register('part_number')}
-              />
-              <InputField
-                label="Manufacturer"
-                error={errors.manufacturer?.message}
-                {...register('manufacturer')}
-              />
-              <SelectField
-                label="Category"
-                error={errors.category_id?.message}
-                options={categoryOptions}
-                {...register('category_id')}
-              />
-              <SelectField
-                label="Bin"
-                error={errors.bin_id?.message}
-                options={binOptions}
-                {...register('bin_id')}
-              />
-              <InputField
-                label="Quantity"
-                type="number"
-                error={errors.quantity?.message}
-                {...register('quantity')}
-              />
-              <InputField
-                label="Supplier"
-                error={errors.supplier?.message}
-                {...register('supplier')}
-              />
-              <InputField
-                label="Supplier Part Number"
-                error={errors.supplier_part_number?.message}
-                {...register('supplier_part_number')}
-              />
-              <InputField
-                label="Location"
-                error={errors.location?.message}
-                {...register('location')}
-              />
-              <InputField
-                label="Datasheet URL"
-                error={errors.datasheet_url?.message}
-                {...register('datasheet_url')}
-              />
-              <InputField
-                label="Image URL"
-                error={errors.image_url?.message}
-                {...register('image_url')}
-              />
-              <TextArea
-                label="Description"
-                error={errors.description?.message}
-                {...register('description')}
-                rows={3}
-              />
-              <TextArea
-                label="Notes"
-                error={errors.notes?.message}
-                {...register('notes')}
-                rows={3}
-              />
+    <div className="p-4 space-y-2">
+      <div className="space-y-1">
+        {fields.map((field, i) => (
+          <div key={field.id} className="flex gap-1">
+            <input
+              {...register(`specifications.${i}.key`)}
+              placeholder="key (e.g. voltage)"
+              className="input-base flex-1"
+            />
+            <input
+              {...register(`specifications.${i}.value`)}
+              placeholder="value (e.g. 5V)"
+              className="input-base flex-1"
+            />
+            <button
+              type="button"
+              onClick={() => remove(i)}
+              className="text-text-muted hover:text-destructive font-mono text-sm px-2 border border-transparent hover:border-destructive/30 transition-colors"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={() => append({ key: '', value: '' })}
+        className="btn-ghost text-[10px] py-1"
+      >
+        + Add Specification
+      </button>
+    </div>
+  )
+}
+
+// ── Documents tab ──────────────────────────────────────────────────
+function DocsTab({ partId }) {
+  const qc = useQueryClient()
+  const [docs, setDocs] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [urlForm, setUrlForm] = useState({ name: '', url: '', document_type: 'datasheet' })
+  const [uploading, setUploading] = useState(false)
+  const [showUrlForm, setShowUrlForm] = useState(false)
+
+  useEffect(() => {
+    if (!partId) return
+    partsApi.listDocs(partId).then(r => setDocs(r.data))
+  }, [partId])
+
+  const addUrl = async () => {
+    if (!urlForm.name || !urlForm.url) return
+    try {
+      const res = await partsApi.addDoc(partId, urlForm)
+      setDocs(d => [...d, res.data])
+      setUrlForm({ name: '', url: '', document_type: 'datasheet' })
+      setShowUrlForm(false)
+      toast.success('Document added')
+    } catch (e) { toast.error(e.message) }
+  }
+
+  const uploadFile = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('name', file.name)
+    fd.append('document_type', 'datasheet')
+    setUploading(true)
+    try {
+      const res = await partsApi.uploadDoc(partId, fd)
+      setDocs(d => [...d, res.data])
+      toast.success('File uploaded')
+    } catch (e) { toast.error(e.message) }
+    finally { setUploading(false); e.target.value = '' }
+  }
+
+  const removeDoc = async (id) => {
+    try {
+      await documentsApi.remove(id)
+      setDocs(d => d.filter(x => x.id !== id))
+      toast.success('Document removed')
+    } catch (e) { toast.error(e.message) }
+  }
+
+  if (!partId) return (
+    <div className="p-4 text-center font-mono text-xs text-text-muted">
+      Save the part first to manage documents
+    </div>
+  )
+
+  return (
+    <div className="p-4 space-y-3">
+      {/* Doc list */}
+      {docs.length === 0 ? (
+        <p className="font-mono text-xs text-text-muted">No documents yet</p>
+      ) : (
+        <div className="space-y-1">
+          {docs.map(d => (
+            <div key={d.id} className="flex items-center gap-2 p-2 bg-hover border border-border group">
+              <span className="font-mono text-[10px] text-text-muted uppercase tracking-wider w-16 shrink-0">
+                {d.document_type || 'doc'}
+              </span>
+              <span className="flex-1 font-mono text-xs text-text-primary truncate">{d.name}</span>
+              {d.url && (
+                <a href={d.url} target="_blank" rel="noopener noreferrer"
+                  className="font-mono text-[10px] text-primary hover:text-primary-hover px-1.5">
+                  ↗ Open
+                </a>
+              )}
+              {d.storage_path && (
+                <a href={documentsApi.downloadUrl(d.id)} target="_blank" rel="noopener noreferrer"
+                  className="font-mono text-[10px] text-primary hover:text-primary-hover px-1.5">
+                  ↓ Download
+                </a>
+              )}
+              <button
+                onClick={() => removeDoc(d.id)}
+                className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-destructive font-mono text-xs transition-opacity"
+              >×</button>
             </div>
-          </Tabs.Tab>
-          <Tabs.Tab label="Specifications">
-            <div className="space-y-4">
-              <h3 className="text-lg font-heading font-bold mb-4">Specifications</h3>
-              
-              {/* Add new specification form */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                <InputField
-                  label="Name"
-                  value={newSpecification.name}
-                  onChange={(e) => setNewSpecification(prev => ({ ...prev, name: e.target.value }))}
-                />
-                <InputField
-                  label="Value"
-                  value={newSpecification.value}
-                  onChange={(e) => setNewSpecification(prev => ({ ...prev, value: e.target.value }))}
-                />
-                <Button 
-                  type="button" 
-                  onClick={handleAddSpecification}
-                  className="self-end"
-                >
-                  Add
-                </Button>
-              </div>
-              
-              {/* Specifications list */}
-              <div className="space-y-2">
-                {specifications.map((spec, index) => (
-                  <div key={index} className="flex items-center justify-between p-2 border border-border rounded">
-                    <div>
-                      <span className="font-medium">{spec.name}:</span> {spec.value}
-                    </div>
-                    <Button 
-                      type="button" 
-                      variant="secondary" 
-                      size="sm"
-                      onClick={() => handleRemoveSpecification(index)}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </Tabs.Tab>
-          <Tabs.Tab label="Documents">
-            <div className="space-y-4">
-              <h3 className="text-lg font-heading font-bold mb-4">Documents</h3>
-              
-              {/* Add new document form */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                <InputField
-                  label="Name"
-                  value={newDocument.name}
-                  onChange={(e) => setNewDocument(prev => ({ ...prev, name: e.target.value }))}
-                />
-                <InputField
-                  label="URL"
-                  value={newDocument.url}
-                  onChange={(e) => setNewDocument(prev => ({ ...prev, url: e.target.value }))}
-                />
-                <Button 
-                  type="button" 
-                  onClick={handleAddDocument}
-                  className="self-end"
-                >
-                  Add
-                </Button>
-              </div>
-              
-              {/* Documents list */}
-              <div className="space-y-2">
-                {documents.map((doc, index) => (
-                  <div key={index} className="flex items-center justify-between p-2 border border-border rounded">
-                    <div>
-                      <span className="font-medium">{doc.name}:</span> {doc.url}
-                    </div>
-                    <Button 
-                      type="button" 
-                      variant="secondary" 
-                      size="sm"
-                      onClick={() => handleRemoveDocument(index)}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </Tabs.Tab>
-        </Tabs>
-        
-        <div className="flex justify-between mt-6">
-          {part && (
-            <Button type="button" variant="secondary" onClick={handleDelete}>
-              Delete Part
-            </Button>
-          )}
-          <div className="flex space-x-2 ml-auto">
-            <Button type="button" variant="secondary" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit">
-              {part ? 'Update Part' : 'Create Part'}
-            </Button>
+          ))}
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => setShowUrlForm(v => !v)}
+          className="btn-ghost text-[10px] py-1"
+        >
+          + Add URL Link
+        </button>
+        <label className="btn-ghost text-[10px] py-1 cursor-pointer">
+          {uploading ? <Spinner size={12} /> : '↑ Upload File'}
+          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp" className="hidden" onChange={uploadFile} />
+        </label>
+      </div>
+
+      {showUrlForm && (
+        <div className="space-y-2 p-3 border border-border bg-hover">
+          <input
+            value={urlForm.name}
+            onChange={e => setUrlForm(f => ({ ...f, name: e.target.value }))}
+            placeholder="Document name"
+            className="input-base"
+          />
+          <input
+            value={urlForm.url}
+            onChange={e => setUrlForm(f => ({ ...f, url: e.target.value }))}
+            placeholder="https://…"
+            className="input-base"
+          />
+          <select
+            value={urlForm.document_type}
+            onChange={e => setUrlForm(f => ({ ...f, document_type: e.target.value }))}
+            className="input-base"
+          >
+            <option value="datasheet">Datasheet</option>
+            <option value="schematic">Schematic</option>
+            <option value="manual">Manual</option>
+            <option value="other">Other</option>
+          </select>
+          <div className="flex gap-2">
+            <Button variant="primary" size="sm" onClick={addUrl}>Add</Button>
+            <Button variant="ghost" size="sm" onClick={() => setShowUrlForm(false)}>Cancel</Button>
           </div>
         </div>
-      </form>
-    </Modal>
-  );
-};
+      )}
+    </div>
+  )
+}
 
-export default PartModal;
+// ── Part Modal ─────────────────────────────────────────────────────
+export default function PartModal() {
+  const { partModalOpen, partModalId, closePartModal } = useApp()
+  const { data: categories = [] } = useCategories()
+  const { data: bins = [] } = useBins()
+  const { data: existingPart, isLoading } = usePart(partModalId)
+  const createPart = useCreatePart()
+  const updatePart = useUpdatePart()
+
+  const [activeTab, setActiveTab] = useState('details')
+  const [tagInput, setTagInput] = useState('')
+  const [tags, setTags] = useState([])
+
+  const { register, handleSubmit, reset, control, formState: { errors } } = useForm({
+    defaultValues: {
+      name: '', part_number: '', manufacturer: '',
+      category_id: '', bin_id: '', quantity: 0,
+      description: '', specifications: [],
+    }
+  })
+
+  const { fields, append, remove } = useFieldArray({ control, name: 'specifications' })
+
+  useEffect(() => {
+    if (!partModalOpen) return
+    if (existingPart) {
+      reset({
+        name: existingPart.name || '',
+        part_number: existingPart.part_number || '',
+        manufacturer: existingPart.manufacturer || '',
+        category_id: existingPart.category_id || '',
+        bin_id: existingPart.bin_id || '',
+        quantity: existingPart.quantity || 0,
+        description: existingPart.description || '',
+        specifications: existingPart.specifications || [],
+      })
+      setTags(existingPart.tags ? existingPart.tags.split(',').map(t => t.trim()).filter(Boolean) : [])
+    } else {
+      reset({ name: '', part_number: '', manufacturer: '', category_id: '', bin_id: '', quantity: 0, description: '', specifications: [] })
+      setTags([])
+    }
+    setActiveTab('details')
+  }, [existingPart, partModalOpen, reset])
+
+  // Flatten category tree for select
+  const flatCategories = []
+  const flatten = (cats, depth = 0) => {
+    cats.forEach(c => {
+      flatCategories.push({ id: c.id, name: ('  '.repeat(depth)) + c.name })
+      if (c.subcategories) flatten(c.subcategories, depth + 1)
+    })
+  }
+  flatten(categories)
+
+  const addTag = () => {
+    const t = tagInput.trim().toLowerCase()
+    if (t && !tags.includes(t)) setTags(prev => [...prev, t])
+    setTagInput('')
+  }
+
+  const onSubmit = async (data) => {
+    const payload = {
+      ...data,
+      category_id: data.category_id ? Number(data.category_id) : null,
+      bin_id: data.bin_id ? Number(data.bin_id) : null,
+      quantity: Number(data.quantity) || 0,
+      tags: tags.join(','),
+      specifications: data.specifications.filter(s => s.key && s.value),
+    }
+
+    try {
+      if (partModalId) {
+        await updatePart.mutateAsync({ id: partModalId, data: payload })
+      } else {
+        await createPart.mutateAsync(payload)
+      }
+      closePartModal()
+    } catch (e) {
+      // toast already shown by mutation
+    }
+  }
+
+  const isPending = createPart.isPending || updatePart.isPending
+  const isEditing = !!partModalId
+
+  return (
+    <Modal
+      open={partModalOpen}
+      onClose={closePartModal}
+      title={isEditing ? 'Edit Part' : 'Add Part'}
+      width="max-w-2xl"
+    >
+      {isLoading && isEditing ? (
+        <div className="flex items-center justify-center py-10"><Spinner /></div>
+      ) : (
+        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col h-full">
+          <Tabs tabs={TABS} active={activeTab} onChange={setActiveTab} />
+
+          <div className="flex-1 overflow-y-auto">
+            {activeTab === 'details' && (
+              <div className="p-4 grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <label className="label-base">Name *</label>
+                  <input
+                    {...register('name', { required: 'Name is required' })}
+                    className={`input-base ${errors.name ? 'border-destructive' : ''}`}
+                    placeholder="e.g. Resistor 10kΩ"
+                  />
+                  {errors.name && <p className="font-mono text-[10px] text-destructive mt-0.5">{errors.name.message}</p>}
+                </div>
+
+                <div>
+                  <label className="label-base">Part Number</label>
+                  <input {...register('part_number')} className="input-base" placeholder="e.g. RES-10K-01" />
+                </div>
+
+                <div>
+                  <label className="label-base">Manufacturer</label>
+                  <input {...register('manufacturer')} className="input-base" placeholder="e.g. Yageo" />
+                </div>
+
+                <div>
+                  <label className="label-base">Category</label>
+                  <select {...register('category_id')} className="input-base">
+                    <option value="">— None —</option>
+                    {flatCategories.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="label-base">Storage Bin</label>
+                  <select {...register('bin_id')} className="input-base">
+                    <option value="">— None —</option>
+                    {bins.map(b => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="label-base">Quantity</label>
+                  <input
+                    type="number"
+                    min="0"
+                    {...register('quantity')}
+                    className="input-base"
+                  />
+                </div>
+
+                <div className="col-span-2">
+                  <label className="label-base">Description</label>
+                  <textarea
+                    {...register('description')}
+                    rows={3}
+                    className="input-base resize-none"
+                    placeholder="Free-form notes, application info…"
+                  />
+                </div>
+
+                {/* Tags */}
+                <div className="col-span-2">
+                  <label className="label-base">Tags</label>
+                  <TagList tags={tags} onRemove={t => setTags(prev => prev.filter(x => x !== t))} />
+                  <div className="flex gap-1 mt-1">
+                    <input
+                      value={tagInput}
+                      onChange={e => setTagInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }}
+                      placeholder="Add tag…"
+                      className="input-base flex-1 py-1"
+                    />
+                    <button type="button" onClick={addTag} className="btn-ghost text-[10px] py-1 px-2">+</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'specs' && (
+              <SpecsTab fields={fields} append={append} remove={remove} register={register} />
+            )}
+
+            {activeTab === 'docs' && (
+              <DocsTab partId={partModalId} />
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-end gap-2 p-4 border-t border-border shrink-0">
+            <Button variant="ghost" type="button" onClick={closePartModal}>Cancel</Button>
+            <Button variant="primary" type="submit" disabled={isPending}>
+              {isPending ? 'Saving…' : isEditing ? 'Update Part' : 'Create Part'}
+            </Button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  )
+}

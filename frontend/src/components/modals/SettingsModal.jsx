@@ -1,197 +1,150 @@
-import React, { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { yupResolver } from '@hookform/resolvers/yup';
-import * as yup from 'yup';
-import Modal from '../ui/Modal';
-import Button from '../ui/Button';
-import InputField from '../ui/InputField';
-import SelectField from '../ui/SelectField';
+import { useState, useEffect } from 'react'
+import { useApp } from '../../context/AppContext'
+import { useSettings, useUpsertSetting } from '../../hooks/useData'
+import { Modal, Button } from '../ui'
 
-// Validation schema for settings form
-const settingsSchema = yup.object({
-  aiProvider: yup.string().required('AI Provider is required'),
-  apiKey: yup.string().required('API Key is required'),
-  theme: yup.string().required('Theme is required'),
-  language: yup.string().required('Language is required')
-}).required();
+const PRESETS = [
+  { label: 'OpenAI', base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { label: 'OpenAI GPT-4o', base_url: 'https://api.openai.com/v1', model: 'gpt-4o' },
+  { label: 'Anthropic Claude', base_url: 'https://api.anthropic.com/v1', model: 'claude-3-5-haiku-20241022' },
+  { label: 'Groq', base_url: 'https://api.groq.com/openai/v1', model: 'llama-3.1-8b-instant' },
+  { label: 'NVIDIA NIM', base_url: 'https://integrate.api.nvidia.com/v1', model: 'meta/llama-3.1-8b-instruct' },
+  { label: 'Custom', base_url: '', model: '' },
+]
 
-const SettingsModal = ({ isOpen, onClose, settings, onSave }) => {
-  // State for API key visibility
-  const [showApiKey, setShowApiKey] = useState(false);
-  
-  // State for configuration status
-  const [isConfigured, setIsConfigured] = useState(!!settings?.apiKey);
-  
-  // Initialize form with react-hook-form
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    reset,
-    setValue
-  } = useForm({
-    resolver: yupResolver(settingsSchema),
-    defaultValues: {
-      aiProvider: settings?.aiProvider || 'openai',
-      apiKey: settings?.apiKey || '',
-      theme: settings?.theme || 'dark',
-      language: settings?.language || 'en'
+export default function SettingsModal() {
+  const { settingsModalOpen, setSettingsModalOpen } = useApp()
+  const { data: settings = [], isLoading } = useSettings()
+  const upsert = useUpsertSetting()
+
+  const [apiKey, setApiKey] = useState('')
+  const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1')
+  const [model, setModel] = useState('gpt-4o-mini')
+  const [showKey, setShowKey] = useState(false)
+  const [preset, setPreset] = useState('OpenAI')
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    if (!settings.length) return
+    const map = Object.fromEntries(settings.map(s => [s.key, s.value]))
+    if (map.api_key) setApiKey(map.api_key)
+    if (map.base_url) setBaseUrl(map.base_url)
+    if (map.model) setModel(map.model)
+  }, [settings])
+
+  const handlePreset = (label) => {
+    setPreset(label)
+    const p = PRESETS.find(x => x.label === label)
+    if (p && label !== 'Custom') {
+      setBaseUrl(p.base_url)
+      setModel(p.model)
     }
-  });
-  
-  // Handle save
-  const handleSave = (data) => {
-    // Check if API key is provided
-    if (data.apiKey) {
-      setIsConfigured(true);
+  }
+
+  const handleSave = async () => {
+    const ops = []
+    if (apiKey && !apiKey.startsWith('**')) {
+      ops.push(upsert.mutateAsync({ key: 'api_key', value: apiKey, is_sensitive: true }))
     }
-    
-    onSave(data);
-  };
-  
-  // Handle test connection
-  const handleTestConnection = async () => {
-    // In a real implementation, this would test the API connection
-    // For now, we'll just simulate a successful test
-    alert('Connection test successful!');
-  };
-  
-  // Handle clear settings
-  const handleClearSettings = () => {
-    reset({
-      aiProvider: 'openai',
-      apiKey: '',
-      theme: 'dark',
-      language: 'en'
-    });
-    setIsConfigured(false);
-  };
-  
+    ops.push(upsert.mutateAsync({ key: 'base_url', value: baseUrl, is_sensitive: false }))
+    ops.push(upsert.mutateAsync({ key: 'model', value: model, is_sensitive: false }))
+    await Promise.all(ops)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2500)
+  }
+
+  const isKeyConfigured = settings.some(s => s.key === 'api_key' && s.value)
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Settings" size="lg">
-      <form onSubmit={handleSubmit(handleSave)}>
-        <div className="space-y-6">
-          {/* AI Provider Settings */}
-          <div className="border border-border rounded p-4">
-            <h3 className="text-lg font-heading font-bold mb-3">AI Provider Settings</h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <SelectField
-                label="AI Provider"
-                error={errors.aiProvider?.message}
-                options={[
-                  { value: 'openai', label: 'OpenAI' },
-                  { value: 'anthropic', label: 'Anthropic' },
-                  { value: 'mistral', label: 'Mistral' },
-                  { value: 'ollama', label: 'Ollama' }
-                ]}
-                {...register('aiProvider')}
-              />
-              
-              <div>
-                <label className="block text-sm font-medium text-text-primary mb-1">
-                  API Key
-                </label>
-                <div className="relative">
-                  <input
-                    type={showApiKey ? "text" : "password"}
-                    className="input-field w-full pr-10"
-                    placeholder="Enter your API key"
-                    {...register('apiKey')}
-                  />
-                  <button
-                    type="button"
-                    className="absolute right-2 top-2 text-text-muted hover:text-text-primary"
-                    onClick={() => setShowApiKey(!showApiKey)}
-                  >
-                    {showApiKey ? '🙈' : '👁️'}
-                  </button>
-                </div>
-                {errors.apiKey && (
-                  <p className="text-destructive text-xs mt-1">{errors.apiKey.message}</p>
-                )}
-              </div>
-            </div>
-            
-            <div className="mt-4 flex items-center">
-              <div className="flex-1">
-                {isConfigured ? (
-                  <div className="flex items-center text-success">
-                    <span className="mr-2">✓</span>
-                    <span>Configured</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center text-warning">
-                    <span className="mr-2">⚠️</span>
-                    <span>Not configured</span>
-                  </div>
-                )}
-              </div>
-              
-              <Button 
-                type="button" 
-                variant="secondary" 
-                onClick={handleTestConnection}
-                disabled={!settings?.apiKey}
+    <Modal open={settingsModalOpen} onClose={() => setSettingsModalOpen(false)} title="Settings" width="max-w-lg">
+      <div className="p-5 space-y-5">
+        {/* Status */}
+        <div className={`flex items-center gap-2 px-3 py-2 border font-mono text-xs
+          ${isKeyConfigured
+            ? 'border-ai-accent/30 bg-ai-accent/5 text-ai-accent'
+            : 'border-primary/30 bg-primary/5 text-primary'
+          }`}>
+          <span>{isKeyConfigured ? '● AI Configured' : '○ API Key Required'}</span>
+        </div>
+
+        {/* Provider preset */}
+        <div>
+          <label className="label-base">Provider Preset</label>
+          <div className="grid grid-cols-3 gap-1">
+            {PRESETS.map(p => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => handlePreset(p.label)}
+                className={`px-2 py-1.5 font-mono text-[10px] uppercase tracking-wider border transition-colors
+                  ${preset === p.label
+                    ? 'border-primary text-primary bg-primary/10'
+                    : 'border-border text-text-muted hover:border-text-muted hover:text-text-primary'
+                  }`}
               >
-                Test Connection
-              </Button>
-            </div>
-          </div>
-          
-          {/* Application Settings */}
-          <div className="border border-border rounded p-4">
-            <h3 className="text-lg font-heading font-bold mb-3">Application Settings</h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <SelectField
-                label="Theme"
-                error={errors.theme?.message}
-                options={[
-                  { value: 'dark', label: 'Dark' },
-                  { value: 'light', label: 'Light' },
-                  { value: 'system', label: 'System Default' }
-                ]}
-                {...register('theme')}
-              />
-              
-              <SelectField
-                label="Language"
-                error={errors.language?.message}
-                options={[
-                  { value: 'en', label: 'English' },
-                  { value: 'es', label: 'Spanish' },
-                  { value: 'fr', label: 'French' },
-                  { value: 'de', label: 'German' }
-                ]}
-                {...register('language')}
-              />
-            </div>
-          </div>
-          
-          {/* Action Buttons */}
-          <div className="flex justify-between">
-            <Button 
-              type="button" 
-              variant="secondary" 
-              onClick={handleClearSettings}
-            >
-              Clear Settings
-            </Button>
-            
-            <div className="flex space-x-2">
-              <Button type="button" variant="secondary" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button type="submit">
-                Save Settings
-              </Button>
-            </div>
+                {p.label}
+              </button>
+            ))}
           </div>
         </div>
-      </form>
-    </Modal>
-  );
-};
 
-export default SettingsModal;
+        {/* API Key */}
+        <div>
+          <label className="label-base">API Key</label>
+          <div className="flex gap-1">
+            <input
+              type={showKey ? 'text' : 'password'}
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+              placeholder="sk-…"
+              className="input-base flex-1"
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              onClick={() => setShowKey(v => !v)}
+              className="btn-ghost text-[10px] px-2"
+            >
+              {showKey ? '◎' : '○'}
+            </button>
+          </div>
+          <p className="font-mono text-[10px] text-text-muted mt-1">
+            Stored securely. Only last 4 chars shown after save.
+          </p>
+        </div>
+
+        {/* Base URL */}
+        <div>
+          <label className="label-base">Base URL (OpenAI-compatible)</label>
+          <input
+            value={baseUrl}
+            onChange={e => setBaseUrl(e.target.value)}
+            placeholder="https://api.openai.com/v1"
+            className="input-base"
+          />
+        </div>
+
+        {/* Model */}
+        <div>
+          <label className="label-base">Model ID</label>
+          <input
+            value={model}
+            onChange={e => setModel(e.target.value)}
+            placeholder="gpt-4o-mini"
+            className="input-base"
+          />
+        </div>
+
+        {/* Save */}
+        <div className="flex items-center gap-3 pt-1">
+          <Button variant="primary" onClick={handleSave} disabled={upsert.isPending}>
+            {upsert.isPending ? 'Saving…' : 'Save Settings'}
+          </Button>
+          {saved && (
+            <span className="font-mono text-[10px] text-ai-accent">✓ Saved</span>
+          )}
+        </div>
+      </div>
+    </Modal>
+  )
+}

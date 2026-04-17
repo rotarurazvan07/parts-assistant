@@ -2,30 +2,141 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-background text-text-primary;
-}
-
 @layer base {
-  h1, h2, h3, h4, h5, h6 {
+  *, *::before, *::after {
+    border-color: theme('colors.border');
+  }
+
+  html, body, #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    @apply bg-bg text-text-primary font-body antialiased;
+    font-size: 13px;
+  }
+
+  h1, h2, h3, h4 {
     @apply font-heading font-bold;
   }
-  
-  body {
-    @apply font-body;
+
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-text-muted;
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply bg-primary text-background px-4 py-2 rounded-sm border border-border font-mono uppercase;
+    @apply bg-primary text-bg px-3 py-1.5 font-mono text-xs uppercase tracking-widest
+           border border-primary hover:bg-primary-hover
+           transition-colors duration-150 cursor-pointer select-none;
   }
-  
+
   .btn-secondary {
-    @apply bg-panel text-text-primary border border-border font-mono px-4 py-2 rounded-sm;
+    @apply bg-panel text-text-primary px-3 py-1.5 font-mono text-xs uppercase tracking-widest
+           border border-border hover:bg-hover hover:border-text-muted
+           transition-colors duration-150 cursor-pointer select-none;
   }
-  
-  .input-field {
-    @apply bg-panel text-text-primary border border-border p-2 font-mono;
+
+  .btn-ghost {
+    @apply text-text-muted px-3 py-1.5 font-mono text-xs uppercase tracking-widest
+           hover:text-text-primary hover:bg-hover
+           transition-colors duration-150 cursor-pointer select-none;
+  }
+
+  .btn-danger {
+    @apply bg-panel text-destructive px-3 py-1.5 font-mono text-xs uppercase tracking-widest
+           border border-destructive hover:bg-destructive hover:text-white
+           transition-colors duration-150 cursor-pointer select-none;
+  }
+
+  .input-base {
+    @apply bg-panel text-text-primary border border-border
+           px-2.5 py-1.5 font-mono text-xs w-full
+           focus:outline-none focus:border-text-muted
+           placeholder:text-text-muted transition-colors duration-150;
+  }
+
+  .label-base {
+    @apply font-mono text-xs uppercase tracking-wider text-text-muted block mb-1;
+  }
+
+  .panel-base {
+    @apply bg-panel border border-border;
+  }
+
+  .tag-chip {
+    @apply inline-flex items-center gap-1 px-2 py-0.5
+           bg-hover border border-border
+           font-mono text-xs text-text-muted;
+  }
+
+  .ai-chip {
+    @apply inline-flex items-center gap-1 px-2 py-0.5
+           bg-hover border border-ai-accent/30
+           font-mono text-xs text-ai-accent;
+  }
+
+  .table-row-base {
+    @apply border-b border-border hover:bg-hover transition-colors duration-100;
+  }
+
+  .table-cell {
+    @apply px-3 py-2 font-mono text-xs text-text-primary truncate;
+  }
+
+  .modal-overlay {
+    @apply fixed inset-0 bg-bg/80 backdrop-blur-sm z-50 flex items-center justify-center p-4;
+  }
+
+  .modal-box {
+    @apply bg-panel border border-border w-full max-h-[90vh] flex flex-col;
+  }
+
+  .section-title {
+    @apply font-mono text-xs uppercase tracking-widest text-text-muted px-3 py-2
+           border-b border-border;
   }
 }
+
+/* AI glow pulse animation */
+@keyframes aiGlow {
+  0%, 100% { box-shadow: 0 0 4px rgba(0,255,65,0.2); }
+  50% { box-shadow: 0 0 12px rgba(0,255,65,0.5); }
+}
+
+.ai-glow {
+  animation: aiGlow 2s ease-in-out infinite;
+}
+
+/* Streaming cursor */
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.cursor-blink::after {
+  content: '▋';
+  @apply text-ai-accent ml-0.5;
+  animation: cursor-blink 0.8s step-end infinite;
+}
+
+/* Prose for AI messages */
+.ai-prose p { @apply mb-2 last:mb-0; }
+.ai-prose ul { @apply list-disc list-inside mb-2 space-y-0.5; }
+.ai-prose ol { @apply list-decimal list-inside mb-2 space-y-0.5; }
+.ai-prose code { @apply bg-hover px-1 rounded font-mono text-ai-accent text-xs; }
+.ai-prose pre { @apply bg-hover border border-border p-2 mb-2 font-mono text-xs overflow-x-auto; }
+.ai-prose strong { @apply text-primary font-bold; }
+.ai-prose h3 { @apply text-text-primary font-bold mb-1 mt-2 text-sm; }

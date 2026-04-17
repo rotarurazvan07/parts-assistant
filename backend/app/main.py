@@ -1,48 +1,56 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import logging
+from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
+import os
 
-from .api.v1 import parts, categories, bins, documents, settings, import_export, part_specifications, search
-from .config import settings as app_settings
+from app.database import engine, SessionLocal
+from app.models import models  # noqa: ensure models are imported before create_all
+from app.database import Base, seed_categories
 
-# Set up logging
-logging.basicConfig(level=getattr(logging, app_settings.log_level.upper()))
+from app.api.v1 import parts, categories, bins, documents, settings, search, import_export, ai
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Create all tables
+    Base.metadata.create_all(bind=engine)
+    # Seed default categories
+    db = SessionLocal()
+    try:
+        seed_categories(db)
+    finally:
+        db.close()
+    yield
+
 
 app = FastAPI(
-    title=app_settings.app_name,
-    description="API for managing electronic components inventory",
-    version=app_settings.app_version
+    title="Smart Electronics Lab API",
+    description="Inventory management and AI assistant for electronics hobbyists",
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include API routes
-app.include_router(parts.router, prefix=app_settings.api_v1_prefix, tags=["parts"])
-app.include_router(categories.router, prefix=app_settings.api_v1_prefix, tags=["categories"])
-app.include_router(bins.router, prefix=app_settings.api_v1_prefix, tags=["bins"])
-app.include_router(documents.router, prefix=app_settings.api_v1_prefix, tags=["documents"])
-app.include_router(settings.router, prefix=app_settings.api_v1_prefix, tags=["settings"])
-app.include_router(import_export.router, prefix=app_settings.api_v1_prefix, tags=["import_export"])
-app.include_router(part_specifications.router, prefix=app_settings.api_v1_prefix, tags=["part_specifications"])
-app.include_router(search.router, prefix=app_settings.api_v1_prefix, tags=["search"])
+# API routes
+API_PREFIX = "/api/v1"
+app.include_router(parts.router, prefix=API_PREFIX)
+app.include_router(categories.router, prefix=API_PREFIX)
+app.include_router(bins.router, prefix=API_PREFIX)
+app.include_router(documents.router, prefix=API_PREFIX)
+app.include_router(settings.router, prefix=API_PREFIX)
+app.include_router(search.router, prefix=API_PREFIX)
+app.include_router(import_export.router, prefix=API_PREFIX)
+app.include_router(ai.router, prefix=API_PREFIX)
 
-@app.get("/")
-def read_root():
-    return {"message": "Welcome to Smart Electronics Lab API"}
 
-@app.on_event("startup")
-async def startup_event():
-    print("Starting up Smart Electronics Lab API...")
-    # Any startup tasks can go here
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    print("Shutting down Smart Electronics Lab API...")
-    # Any cleanup tasks can go here
+@app.get("/api/v1/health")
+def health():
+    return {"status": "ok", "version": "1.0.0"}

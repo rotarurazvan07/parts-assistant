@@ -2,97 +2,53 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 
-from ... import models, schemas
-from ...database import get_db
-from ...exceptions import BinNotFoundException
-from ...utils.common import get_entity_by_id_or_raise
-from ...utils.validation import sanitize_string, validate_bin_delete
+from app.database import get_db
+from app.models.models import Bin
+from app.schemas.schemas import BinCreate, BinUpdate, BinOut
 
-router = APIRouter()
+router = APIRouter(prefix="/bins", tags=["bins"])
 
-@router.get("/bins", response_model=List[schemas.Bin])
-def get_bins(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    try:
-        bins = db.query(models.Bin).offset(skip).limit(limit).all()
-        return bins
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving bins: {str(e)}")
 
-@router.get("/bins/{bin_id}", response_model=schemas.Bin)
+@router.get("", response_model=List[BinOut])
+def list_bins(db: Session = Depends(get_db)):
+    return db.query(Bin).order_by(Bin.name).all()
+
+
+@router.get("/{bin_id}", response_model=BinOut)
 def get_bin(bin_id: int, db: Session = Depends(get_db)):
-    try:
-        bin = get_entity_by_id_or_raise(
-            db, models.Bin, bin_id, BinNotFoundException
-        )
-        return bin
-    except BinNotFoundException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving bin: {str(e)}")
+    b = db.query(Bin).filter(Bin.id == bin_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Bin not found")
+    return b
 
-@router.post("/bins", response_model=schemas.Bin)
-def create_bin(bin: schemas.BinCreate, db: Session = Depends(get_db)):
-    try:
-        # Sanitize text fields
-        bin_data = bin.dict()
-        if bin_data.get('name'):
-            bin_data['name'] = sanitize_string(bin_data['name'])
-        if bin_data.get('location'):
-            bin_data['location'] = sanitize_string(bin_data['location'])
-        if bin_data.get('description'):
-            bin_data['description'] = sanitize_string(bin_data['description'])
-        
-        db_bin = models.Bin(**bin_data)
-        db.add(db_bin)
-        db.commit()
-        db.refresh(db_bin)
-        return db_bin
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error creating bin: {str(e)}")
 
-@router.put("/bins/{bin_id}", response_model=schemas.Bin)
-def update_bin(bin_id: int, bin: schemas.BinUpdate, db: Session = Depends(get_db)):
-    try:
-        db_bin = get_entity_by_id_or_raise(
-            db, models.Bin, bin_id, BinNotFoundException
-        )
-        
-        # Sanitize text fields
-        bin_data = bin.dict(exclude_unset=True)
-        for field in ['name', 'location', 'description']:
-            if field in bin_data and bin_data[field]:
-                bin_data[field] = sanitize_string(bin_data[field])
-        
-        for key, value in bin_data.items():
-            setattr(db_bin, key, value)
-        
-        db.commit()
-        db.refresh(db_bin)
-        return db_bin
-    except BinNotFoundException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error updating bin: {str(e)}")
+@router.post("", response_model=BinOut, status_code=201)
+def create_bin(data: BinCreate, db: Session = Depends(get_db)):
+    b = Bin(**data.model_dump())
+    db.add(b)
+    db.commit()
+    db.refresh(b)
+    return b
 
-@router.delete("/bins/{bin_id}")
+
+@router.put("/{bin_id}", response_model=BinOut)
+def update_bin(bin_id: int, data: BinUpdate, db: Session = Depends(get_db)):
+    b = db.query(Bin).filter(Bin.id == bin_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Bin not found")
+    for k, v in data.model_dump(exclude_none=True).items():
+        setattr(b, k, v)
+    db.commit()
+    db.refresh(b)
+    return b
+
+
+@router.delete("/{bin_id}", status_code=204)
 def delete_bin(bin_id: int, db: Session = Depends(get_db)):
-    try:
-        db_bin = get_entity_by_id_or_raise(
-            db, models.Bin, bin_id, BinNotFoundException
-        )
-        
-        # Validate business rules for bin deletion
-        validate_bin_delete(db, bin_id)
-        
-        db.delete(db_bin)
-        db.commit()
-        return {"message": "Bin deleted successfully"}
-    except HTTPException:
-        raise
-    except BinNotFoundException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error deleting bin: {str(e)}")
+    b = db.query(Bin).filter(Bin.id == bin_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Bin not found")
+    from app.models.models import Part
+    db.query(Part).filter(Part.bin_id == bin_id).update({"bin_id": None})
+    db.delete(b)
+    db.commit()

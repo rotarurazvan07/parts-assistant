@@ -1,77 +1,72 @@
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
 
-from ... import models, schemas
-from ...database import get_db
-from ...exceptions import SettingNotFoundException
-from ...utils.common import get_entity_by_id_or_raise
+from app.database import get_db
+from app.models.models import Setting
+from app.schemas.schemas import SettingCreate, SettingUpdate, SettingOut
 
-router = APIRouter()
+router = APIRouter(prefix="/settings", tags=["settings"])
 
-@router.get("/settings", response_model=List[schemas.Setting])
-def get_settings(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    try:
-        settings = db.query(models.Setting).offset(skip).limit(limit).all()
-        return settings
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving settings: {str(e)}")
+MASK = "**********"
 
-@router.get("/settings/{setting_id}", response_model=schemas.Setting)
-def get_setting(setting_id: int, db: Session = Depends(get_db)):
-    try:
-        setting = get_entity_by_id_or_raise(
-            db, models.Setting, setting_id, SettingNotFoundException
-        )
-        return setting
-    except SettingNotFoundException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving setting: {str(e)}")
 
-@router.post("/settings", response_model=schemas.Setting)
-def create_setting(setting: schemas.SettingCreate, db: Session = Depends(get_db)):
-    try:
-        db_setting = models.Setting(**setting.dict())
-        db.add(db_setting)
-        db.commit()
-        db.refresh(db_setting)
-        return db_setting
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error creating setting: {str(e)}")
+def _mask(setting: Setting) -> SettingOut:
+    value = setting.value
+    if setting.is_sensitive and value:
+        # Show only last 4 chars
+        value = MASK + value[-4:] if len(value) >= 4 else MASK
+    return SettingOut(id=setting.id, key=setting.key, value=value, is_sensitive=setting.is_sensitive)
 
-@router.put("/settings/{setting_id}", response_model=schemas.Setting)
-def update_setting(setting_id: int, setting: schemas.SettingUpdate, db: Session = Depends(get_db)):
-    try:
-        db_setting = get_entity_by_id_or_raise(
-            db, models.Setting, setting_id, SettingNotFoundException
-        )
-        
-        for key, value in setting.dict(exclude_unset=True).items():
-            setattr(db_setting, key, value)
-        
-        db.commit()
-        db.refresh(db_setting)
-        return db_setting
-    except SettingNotFoundException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error updating setting: {str(e)}")
 
-@router.delete("/settings/{setting_id}")
-def delete_setting(setting_id: int, db: Session = Depends(get_db)):
-    try:
-        db_setting = get_entity_by_id_or_raise(
-            db, models.Setting, setting_id, SettingNotFoundException
-        )
-        
-        db.delete(db_setting)
-        db.commit()
-        return {"message": "Setting deleted successfully"}
-    except SettingNotFoundException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error deleting setting: {str(e)}")
+def _is_masked(value: str) -> bool:
+    return value is not None and value.startswith(MASK)
+
+
+@router.get("", response_model=List[SettingOut])
+def list_settings(db: Session = Depends(get_db)):
+    return [_mask(s) for s in db.query(Setting).all()]
+
+
+@router.get("/{key}", response_model=SettingOut)
+def get_setting(key: str, db: Session = Depends(get_db)):
+    s = db.query(Setting).filter(Setting.key == key).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Setting not found")
+    return _mask(s)
+
+
+@router.post("", response_model=SettingOut, status_code=201)
+def create_setting(data: SettingCreate, db: Session = Depends(get_db)):
+    existing = db.query(Setting).filter(Setting.key == data.key).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Setting already exists. Use PUT to update.")
+    s = Setting(key=data.key, value=data.value, is_sensitive=data.is_sensitive)
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    return _mask(s)
+
+
+@router.put("/{key}", response_model=SettingOut)
+def update_setting(key: str, data: SettingUpdate, db: Session = Depends(get_db)):
+    s = db.query(Setting).filter(Setting.key == key).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Setting not found")
+    # Only update value if it's not the masked placeholder
+    if data.value is not None and not _is_masked(data.value):
+        s.value = data.value
+    if data.is_sensitive is not None:
+        s.is_sensitive = data.is_sensitive
+    db.commit()
+    db.refresh(s)
+    return _mask(s)
+
+
+@router.delete("/{key}", status_code=204)
+def delete_setting(key: str, db: Session = Depends(get_db)):
+    s = db.query(Setting).filter(Setting.key == key).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Setting not found")
+    db.delete(s)
+    db.commit()

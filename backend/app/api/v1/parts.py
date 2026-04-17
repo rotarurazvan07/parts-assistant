@@ -1,120 +1,206 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from typing import List
+import math
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_, func
 
-from ... import models, schemas
-from ...database import get_db
-from ...exceptions import PartNotFoundException
-from ...utils.common import get_entity_by_id_or_raise
-from ...utils.validation import (
-    validate_part_references,
-    validate_unique_part_number,
-    sanitize_string
+from app.database import get_db
+from app.models.models import Part, Category, Bin, PartSpecification, Document
+from app.schemas.schemas import (
+    PartCreate, PartUpdate, PartOut, PartListItem, PartsPage,
+    SpecificationCreate, SpecificationUpdate, SpecificationOut,
 )
 
-router = APIRouter()
+router = APIRouter(prefix="/parts", tags=["parts"])
 
-@router.get("/parts", response_model=List[schemas.Part])
-def get_parts(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    try:
-        parts = db.query(models.Part).offset(skip).limit(limit).all()
-        return parts
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving parts: {str(e)}")
 
-@router.get("/parts/{part_id}", response_model=schemas.Part)
+def _mask_none(val):
+    return val
+
+
+# ──────────────────────────────────────────────
+# Parts CRUD
+# ──────────────────────────────────────────────
+
+@router.get("", response_model=PartsPage)
+def list_parts(
+    page: int = Query(1, ge=1),
+    limit: int = Query(25, ge=1, le=200),
+    search: Optional[str] = Query(None),
+    category_id: Optional[int] = Query(None),
+    bin_id: Optional[int] = Query(None),
+    sort_by: Optional[str] = Query("name"),
+    sort_order: Optional[str] = Query("asc"),
+    db: Session = Depends(get_db),
+):
+    q = db.query(Part).options(
+        joinedload(Part.category),
+        joinedload(Part.bin),
+    )
+
+    if search:
+        term = f"%{search}%"
+        q = q.filter(
+            or_(
+                Part.name.ilike(term),
+                Part.part_number.ilike(term),
+                Part.manufacturer.ilike(term),
+                Part.description.ilike(term),
+                Part.tags.ilike(term),
+            )
+        )
+
+    if category_id is not None:
+        q = q.filter(Part.category_id == category_id)
+
+    if bin_id is not None:
+        q = q.filter(Part.bin_id == bin_id)
+
+    total = q.count()
+
+    sortable = {
+        "name": Part.name,
+        "part_number": Part.part_number,
+        "manufacturer": Part.manufacturer,
+        "category_id": Part.category_id,
+        "bin_id": Part.bin_id,
+        "quantity": Part.quantity,
+        "created_at": Part.created_at,
+        "updated_at": Part.updated_at,
+    }
+    sort_col = sortable.get(sort_by, Part.name)
+    if sort_order == "desc":
+        sort_col = sort_col.desc()
+    q = q.order_by(sort_col)
+
+    offset = (page - 1) * limit
+    parts = q.offset(offset).limit(limit).all()
+
+    return PartsPage(
+        parts=parts,
+        total=total,
+        page=page,
+        pages=math.ceil(total / limit) if total else 1,
+    )
+
+
+@router.get("/{part_id}", response_model=PartOut)
 def get_part(part_id: int, db: Session = Depends(get_db)):
-    try:
-        part = get_entity_by_id_or_raise(
-            db, models.Part, part_id, PartNotFoundException
+    part = (
+        db.query(Part)
+        .options(
+            joinedload(Part.category),
+            joinedload(Part.bin),
+            joinedload(Part.specifications),
+            joinedload(Part.documents),
         )
-        return part
-    except PartNotFoundException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving part: {str(e)}")
+        .filter(Part.id == part_id)
+        .first()
+    )
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+    return part
 
-@router.post("/parts", response_model=schemas.Part)
-def create_part(part: schemas.PartCreate, db: Session = Depends(get_db)):
-    try:
-        # Validate part number uniqueness
-        if part.part_number:
-            validate_unique_part_number(db, part.part_number)
-        
-        # Validate category and bin references
-        validate_part_references(db, None, 'category_id', part.category_id)
-        validate_part_references(db, None, 'bin_id', part.bin_id)
-        
-        # Sanitize text fields
-        part_data = part.dict()
-        if part_data.get('name'):
-            part_data['name'] = sanitize_string(part_data['name'])
-        if part_data.get('description'):
-            part_data['description'] = sanitize_string(part_data['description'])
-        if part_data.get('notes'):
-            part_data['notes'] = sanitize_string(part_data['notes'])
-        
-        db_part = models.Part(**part_data)
-        db.add(db_part)
-        db.commit()
-        db.refresh(db_part)
-        return db_part
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error creating part: {str(e)}")
 
-@router.put("/parts/{part_id}", response_model=schemas.Part)
-def update_part(part_id: int, part: schemas.PartUpdate, db: Session = Depends(get_db)):
-    try:
-        db_part = get_entity_by_id_or_raise(
-            db, models.Part, part_id, PartNotFoundException
-        )
-        
-        part_data = part.dict(exclude_unset=True)
-        
-        # Validate part number uniqueness if being updated
-        if 'part_number' in part_data and part_data['part_number']:
-            validate_unique_part_number(db, part_data['part_number'], exclude_part_id=part_id)
-        
-        # Validate category and bin references if being updated
-        if 'category_id' in part_data:
-            validate_part_references(db, part_id, 'category_id', part_data.get('category_id'))
-        if 'bin_id' in part_data:
-            validate_part_references(db, part_id, 'bin_id', part_data.get('bin_id'))
-        
-        # Sanitize text fields
-        for field in ['name', 'description', 'notes']:
-            if field in part_data and part_data[field]:
-                part_data[field] = sanitize_string(part_data[field])
-        
-        for key, value in part_data.items():
-            setattr(db_part, key, value)
-        
-        db.commit()
-        db.refresh(db_part)
-        return db_part
-    except HTTPException:
-        raise
-    except PartNotFoundException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error updating part: {str(e)}")
+@router.post("", response_model=PartOut, status_code=201)
+def create_part(data: PartCreate, db: Session = Depends(get_db)):
+    specs = data.specifications or []
+    part_data = data.model_dump(exclude={"specifications"})
+    part = Part(**part_data)
+    db.add(part)
+    db.flush()
+    for s in specs:
+        db.add(PartSpecification(part_id=part.id, key=s.key, value=s.value))
+    db.commit()
+    db.refresh(part)
+    return db.query(Part).options(
+        joinedload(Part.category),
+        joinedload(Part.bin),
+        joinedload(Part.specifications),
+        joinedload(Part.documents),
+    ).filter(Part.id == part.id).first()
 
-@router.delete("/parts/{part_id}")
+
+@router.put("/{part_id}", response_model=PartOut)
+def update_part(part_id: int, data: PartUpdate, db: Session = Depends(get_db)):
+    part = db.query(Part).filter(Part.id == part_id).first()
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+
+    update_data = data.model_dump(exclude={"specifications"}, exclude_none=True)
+    for k, v in update_data.items():
+        setattr(part, k, v)
+
+    if data.specifications is not None:
+        db.query(PartSpecification).filter(PartSpecification.part_id == part_id).delete()
+        for s in data.specifications:
+            db.add(PartSpecification(part_id=part_id, key=s.key, value=s.value))
+
+    db.commit()
+    db.refresh(part)
+    return db.query(Part).options(
+        joinedload(Part.category),
+        joinedload(Part.bin),
+        joinedload(Part.specifications),
+        joinedload(Part.documents),
+    ).filter(Part.id == part_id).first()
+
+
+@router.delete("/{part_id}", status_code=204)
 def delete_part(part_id: int, db: Session = Depends(get_db)):
-    try:
-        db_part = get_entity_by_id_or_raise(
-            db, models.Part, part_id, PartNotFoundException
-        )
-        
-        db.delete(db_part)
-        db.commit()
-        return {"message": "Part deleted successfully"}
-    except PartNotFoundException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error deleting part: {str(e)}")
+    part = db.query(Part).filter(Part.id == part_id).first()
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+    db.delete(part)
+    db.commit()
+
+
+# ──────────────────────────────────────────────
+# Specifications
+# ──────────────────────────────────────────────
+
+@router.get("/{part_id}/specifications", response_model=list[SpecificationOut])
+def list_specs(part_id: int, db: Session = Depends(get_db)):
+    part = db.query(Part).filter(Part.id == part_id).first()
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+    return db.query(PartSpecification).filter(PartSpecification.part_id == part_id).all()
+
+
+@router.post("/{part_id}/specifications", response_model=SpecificationOut, status_code=201)
+def add_spec(part_id: int, data: SpecificationCreate, db: Session = Depends(get_db)):
+    part = db.query(Part).filter(Part.id == part_id).first()
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+    spec = PartSpecification(part_id=part_id, key=data.key, value=data.value)
+    db.add(spec)
+    db.commit()
+    db.refresh(spec)
+    return spec
+
+
+@router.put("/{part_id}/specifications/{spec_id}", response_model=SpecificationOut)
+def update_spec(part_id: int, spec_id: int, data: SpecificationUpdate, db: Session = Depends(get_db)):
+    spec = db.query(PartSpecification).filter(
+        PartSpecification.id == spec_id,
+        PartSpecification.part_id == part_id,
+    ).first()
+    if not spec:
+        raise HTTPException(status_code=404, detail="Specification not found")
+    spec.key = data.key
+    spec.value = data.value
+    db.commit()
+    db.refresh(spec)
+    return spec
+
+
+@router.delete("/{part_id}/specifications/{spec_id}", status_code=204)
+def delete_spec(part_id: int, spec_id: int, db: Session = Depends(get_db)):
+    spec = db.query(PartSpecification).filter(
+        PartSpecification.id == spec_id,
+        PartSpecification.part_id == part_id,
+    ).first()
+    if not spec:
+        raise HTTPException(status_code=404, detail="Specification not found")
+    db.delete(spec)
+    db.commit()
